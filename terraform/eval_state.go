@@ -10,6 +10,7 @@ type EvalReadState struct {
 	Name         string
 	Tainted      bool
 	TaintedIndex int
+	Deposed      bool
 	Output       **InstanceState
 }
 
@@ -34,10 +35,7 @@ func (n *EvalReadState) Eval(ctx EvalContext) (interface{}, error) {
 	}
 
 	var result *InstanceState
-	if !n.Tainted {
-		// Return the primary
-		result = rs.Primary
-	} else {
+	if n.Tainted {
 		// Get the index. If it is negative, then we get the last one
 		idx := n.TaintedIndex
 		if idx < 0 {
@@ -47,6 +45,11 @@ func (n *EvalReadState) Eval(ctx EvalContext) (interface{}, error) {
 			// Return the proper tainted resource
 			result = rs.Tainted[idx]
 		}
+	} else if n.Deposed {
+		result = rs.Deposed
+	} else {
+		// Return the primary
+		result = rs.Primary
 	}
 
 	// Write the result to the output pointer
@@ -108,6 +111,7 @@ type EvalWriteState struct {
 	Tainted             *bool
 	TaintedIndex        int
 	TaintedClearPrimary bool
+	Deposed             bool
 }
 
 // TODO: test
@@ -147,6 +151,8 @@ func (n *EvalWriteState) Eval(ctx EvalContext) (interface{}, error) {
 		if n.TaintedClearPrimary {
 			rs.Primary = nil
 		}
+	} else if n.Deposed {
+		rs.Deposed = *n.State
 	} else {
 		// Set the primary state
 		rs.Primary = *n.State
@@ -156,7 +162,7 @@ func (n *EvalWriteState) Eval(ctx EvalContext) (interface{}, error) {
 }
 
 // EvalDeposeState is an EvalNode implementation that takes the primary
-// out of a state and makes it tainted. This is done at the beggining of
+// out of a state and makes it Deposed. This is done at the beginning of
 // create-before-destroy calls so that the create can create while preserving
 // the old state of the to-be-destroyed resource.
 type EvalDeposeState struct {
@@ -188,8 +194,8 @@ func (n *EvalDeposeState) Eval(ctx EvalContext) (interface{}, error) {
 		return nil, nil
 	}
 
-	// Depose to the tainted
-	rs.Tainted = append(rs.Tainted, rs.Primary)
+	// Depose
+	rs.Deposed = rs.Primary
 	rs.Primary = nil
 
 	return nil, nil
@@ -221,15 +227,14 @@ func (n *EvalUndeposeState) Eval(ctx EvalContext) (interface{}, error) {
 		return nil, nil
 	}
 
-	// If we don't have any tainted, then we don't have anything to do
-	if len(rs.Tainted) == 0 {
+	// If we don't have any desposed resource, then we don't have anything to do
+	if rs.Deposed == nil {
 		return nil, nil
 	}
 
-	// Undepose to the tainted
-	idx := len(rs.Tainted) - 1
-	rs.Primary = rs.Tainted[idx]
-	rs.Tainted[idx] = nil
+	// Undepose
+	rs.Primary = rs.Deposed
+	rs.Deposed = nil
 
 	return nil, nil
 }
